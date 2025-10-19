@@ -1,0 +1,56 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPI.h>
+#include <mcp2515.h>
+
+struct can_frame canMsg;
+MCP2515 mcp2515(5);
+WebServer server(80);
+
+const char* ssid = "CAN_Sniffer";
+const char* password = "12345678";
+String canData = "[]";
+
+void handleRoot() {
+  String html = "<!DOCTYPE html><html><head><title>CAN Bus Sniffer</title>";
+  html += "<style>body{font-family:Arial;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;}th{background-color:#f2f2f2;}</style>";
+  html += "</head><body><h1>CAN Bus Sniffer</h1><table id='canTable'><tr><th>ID</th><th>Data</th><th>Timestamp</th></tr></table>";
+  html += "<script>function updateTable(){fetch('/data').then(response=>response.json()).then(data=>{";
+  html += "let table=document.getElementById('canTable');table.innerHTML='<tr><th>ID</th><th>Data</th><th>Timestamp</th></tr>';";
+  html += "data.forEach(row=>{table.innerHTML+='<tr><td>'+row.id+'</td><td>'+row.data+'</td><td>'+row.time+'</td></tr>';});";
+  html += "});}setInterval(updateTable,1000);updateTable();</script></body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleData() {
+  server.send(200, "application/json", canData);
+}
+
+void setup() {
+  Serial.begin(115200);
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ);
+  mcp2515.setNormalMode();
+  WiFi.softAP(ssid, password);
+  server.on("/", handleRoot);
+  server.on("/data", handleData);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+  if (mcp2515.readMessage(&canMsg) == MCP2515::ERROR_OK) {
+    String msg = "{";
+    msg += "\"id\":\"" + String(canMsg.can_id, HEX) + "\",";
+    msg += "\"data\":\"";
+    for (int i = 0; i < canMsg.can_dlc; i++) {
+      msg += String(canMsg.data[i], HEX);
+      if (i < canMsg.can_dlc - 1) msg += " ";
+    }
+    msg += "\",";
+    msg += "\"time\":\"" + String(millis()) + "\"}";
+    canData = canData.substring(0, canData.length() - 1) + "," + msg + "]";
+    if (canData.length() > 1000) canData = "[" + msg + "]";
+  }
+  delay(10);
+}
